@@ -1,0 +1,78 @@
+name: Daily Wall Street News (WeCom)
+
+on:
+  schedule:
+    # 北京时间每天 19:00（UTC 11:00）
+    - cron: "0 11 * * *"
+  workflow_dispatch:  # 允许手动测试
+
+jobs:
+  send-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+
+      - name: Fetch and Send via WeCom
+        env:
+          WECHAT_WEBHOOK: ${{ secrets.WECHAT_WEBHOOK }}
+          GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
+        run: |
+          python <<'EOF'
+import requests
+import os
+from datetime import datetime, timedelta
+
+webhook = os.getenv("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=cb15f0f9-a872-4f7a-9bea-bd097fb55e6e")
+gnews_key = os.getenv("8ad16ef77565dd9d7642f19b42b3fd19")
+
+if not webhook or not gnews_key:
+    print("❌ 缺少 WECHAT_WEBHOOK 或 GNEWS_API_KEY")
+    exit(1)
+
+# 获取昨天日期
+yesterday = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+# 华尔街关键词 + 权威媒体
+query = (
+    '"Wall Street" OR Fed OR Federal Reserve OR '
+    '"S&P 500" OR Nasdaq OR Dow OR '
+    'inflation OR interest rate OR treasury OR bond OR '
+    'earnings OR GDP OR recession OR '
+    'oil price OR gold OR dollar OR market'
+)
+sources = "bloomberg.com,reuters.com,cnbc.com,wsj.com,ft.com,marketwatch.com"
+
+# 调用 GNews
+try:
+    resp = requests.get(
+        "https://gnews.io/api/v4/search",
+        params={
+            'q': query,
+            'lang': 'zh',
+            'source': sources,
+            'max': 30,
+            'apikey': gnews_key,
+            'from': yesterday + 'T00:00:00Z',
+            'to': yesterday + 'T23:59:59Z'
+        },
+        timeout=15
+    )
+    articles = resp.json().get('articles', [])
+except Exception as e:
+    print("❌ 获取新闻失败:", e)
+    articles = []
+
+# 去重
+seen = set()
+unique = []
+for a in articles:
+    t = a['title'].strip()
+    if t and len(t) > 15 and t not in seen:
+        unique.append(a)
